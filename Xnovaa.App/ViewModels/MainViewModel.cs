@@ -680,8 +680,19 @@ public partial class MainViewModel : ObservableObject
         _playlists.Save();
     }
 
+    private bool _disposed;
+
+    /// <summary>
+    /// Detaches playback event handlers and disposes the playback engine.
+    /// NOTE: App.OnExit calls ThumbnailService.Shutdown() FIRST, then this —
+    /// LibVLC must not die while thumbnail sessions are still running.
+    /// Safe to call multiple times (window Closing + App.OnExit path).
+    /// </summary>
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+
         _playback.PositionChanged -= OnPlaybackPosition;
         _playback.TimeChanged -= OnPlaybackTime;
         _playback.DurationChanged -= OnPlaybackDuration;

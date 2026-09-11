@@ -37,13 +37,25 @@ public partial class MainWindow : Window
         }
         else
         {
-            _onPlayerCreated = p => Dispatcher.Invoke(() => VideoViewHost.MediaPlayer = p);
+            _onPlayerCreated = p =>
+            {
+                // Guard: window may already be closing when the lazy player appears.
+                try
+                {
+                    if (Dispatcher.CheckAccess())
+                        VideoViewHost.MediaPlayer = p;
+                    else
+                        Dispatcher.Invoke(() => VideoViewHost.MediaPlayer = p);
+                }
+                catch { /* window shutting down — ignore */ }
+            };
             App.PlaybackService.PlayerCreated += _onPlayerCreated;
         }
 
         RestoreWindowPlacement();
         Vm.InitializeFromState();
         Vm.FullscreenRequested += (_, _) => ToggleFullscreenInternal();
+        Loaded -= OnLoaded;   // loaded once — no re-wiring on re-show
     }
 
     private Action<LibVLCSharp.Shared.MediaPlayer>? _onPlayerCreated;
@@ -85,7 +97,9 @@ public partial class MainWindow : Window
         }
         SaveWindowPlacement();
         Vm.OnWindowClosing();
-        Vm.Dispose();
+        // NOTE: Vm.Dispose() (which disposes LibVLC) intentionally happens in
+        // App.OnExit AFTER ThumbnailService.Shutdown() — disposing here would
+        // kill LibVLC while background thumbnail sessions still use it.
     }
 
     private void SaveWindowPlacement()
