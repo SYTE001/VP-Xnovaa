@@ -99,15 +99,79 @@ public class VideoLibraryService : IVideoLibraryService
     public async Task<int> AddFolderAsync(string folder, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         int added = 0;
-        var files = Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
-            .Where(f => VideoExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+
+        if (!Directory.Exists(folder))
+        {
+            App.LogDiagSafe($"[FolderImport] selected path is not a directory: {folder}");
+            return 0;
+        }
+
+        // Enumeration itself can throw on inaccessible subfolders — collect what
+        // we can instead of failing the whole import (crash-safety req 2/7/12).
+        var files = new List<string>();
+        var enumerationFailures = 0;
+        var enumerator = Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
+            .GetEnumerator();
+        while (true)
+        {
+            try
+            {
+                if (!enumerator.MoveNext()) break;
+                files.Add(enumerator.Current);
+            }
+            catch (UnauthorizedAccessException) { enumerationFailures++; }
+            catch (DirectoryNotFoundException) { enumerationFailures++; }
+            catch (PathTooLongException) { enumerationFailures++; }
+            catch (IOException) { enumerationFailures++; }
+            catch (Exception ex)
+            {
+                // Unexpected but must not kill the import.
+                enumerationFailures++;
+                App.LogDiagSafe($"[FolderImport] enumeration error: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        var supported = files
+            .Where(f =>
+            {
+                try
+                {
+                    var ext = Path.GetExtension(f);
+                    return !string.IsNullOrEmpty(ext)
+                        && VideoExtensions.Contains(ext.ToLowerInvariant());
+                }
+                catch { return false; }   // pathological path entry — skip it
+            })
             .ToList();
 
-        foreach (var file in files)
+        if (enumerationFailures > 0)
+            App.LogDiagSafe($"[FolderImport] {folder}: {supported.Count} candidate files, " +
+                            $"{enumerationFailures} unreadable entries skipped");
+
+        foreach (var file in supported)
         {
             ct.ThrowIfCancellationRequested();
-            if (Add(file) is not null) added++;
-            progress?.Report($"{added} new of {files.Count}");
+            try
+            {
+                if (Add(file) is not null) added++;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                App.LogDiagSafe($"[FolderImport] access denied, skipped: {file}");
+            }
+            catch (FileNotFoundException)
+            {
+                // file vanished between enumeration and add — skip silently
+            }
+            catch (IOException ex)
+            {
+                App.LogDiagSafe($"[FolderImport] IO error, skipped: {file}: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                App.LogDiagSafe($"[FolderImport] unexpected error, skipped: {file}: {ex.GetType().Name}: {ex.Message}");
+            }
+            progress?.Report($"{added} new of {supported.Count}");
             // yield periodically so UI stays responsive
             if (added % 25 == 0) await Task.Delay(1, ct);
         }

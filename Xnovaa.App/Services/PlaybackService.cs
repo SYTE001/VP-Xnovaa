@@ -485,37 +485,24 @@ public class PlaybackService : IPlaybackService
         lock (_gate) return _libVlc;
     }
 
-    public async Task<TimeSpan> GetDurationAsync(string filePath)
+    /// <summary>
+    /// Duration read for files on the folder-import path. Uses the Windows Shell
+    /// property system (System.Media.Duration) — NOT libvlc: libvlc's demuxer can
+    /// access-violate or deadlock on malformed/truncated media, a native crash no
+    /// managed handler can catch. Shell property handlers are isolated by Windows
+    /// itself and cannot take down the process. Returns Zero when unavailable;
+    /// never throws.
+    /// </summary>
+    public Task<TimeSpan> GetDurationAsync(string filePath)
     {
-        LibVLC? libVlc;
-        lock (_gate)
+        var d = Utils.ShellMediaMetadata.GetDuration(filePath);
+        if (d is { } dur && dur > TimeSpan.Zero)
         {
-            if (_disposed) return TimeSpan.Zero;
-            libVlc = _libVlc;
-            if (libVlc is null)
-            {
-                _ = CreateInstanceLocked();
-                libVlc = _libVlc;
-            }
-            if (libVlc is null) return TimeSpan.Zero;
+            Diag($"duration (shell): {Path.GetFileName(filePath)} = {(long)dur.TotalMilliseconds}ms");
+            return Task.FromResult(dur);
         }
-
-        var media = new Media(libVlc!, new Uri(filePath));
-        try
-        {
-            var status = await media.Parse(MediaParseOptions.ParseLocal);
-            if (status != MediaParsedStatus.Done) return TimeSpan.Zero;
-            return TimeSpan.FromMilliseconds(media.Duration);
-        }
-        catch (Exception ex)
-        {
-            Diag($"duration parse failed for {filePath}: {ex.Message}");
-            return TimeSpan.Zero;
-        }
-        finally
-        {
-            try { media.Dispose(); } catch { }
-        }
+        Diag($"duration (shell): unavailable for {Path.GetFileName(filePath)}");
+        return Task.FromResult(TimeSpan.Zero);
     }
 
     // ------------------------------------------------ disposal (idempotent, P1)

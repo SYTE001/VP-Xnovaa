@@ -393,10 +393,17 @@ public partial class MainViewModel : ObservableObject
     private async Task ImportFolderAsync()
     {
         var folder = PickFolder();
-        if (folder is null) return;
+        if (folder is null) return;   // user canceled — do nothing (safety req 18)
 
         await ImportPathsAsync(Array.Empty<string>(), folder);
     }
+
+    /// <summary>
+    /// QA hook: drives the exact same import pipeline as ImportFolderAsync but
+    /// with a pre-selected folder (bypasses the modal picker). Internal use only.
+    /// </summary>
+    internal Task ImportFolderForQaAsync(string folder)
+        => ImportPathsAsync(Array.Empty<string>(), folder);
 
     private static string? PickFolder()
     {
@@ -410,28 +417,58 @@ public partial class MainViewModel : ObservableObject
         return null;
     }
 
+    private bool _importRunning;   // re-entrancy guard (crash-safety req 19)
+
     private async Task ImportPathsAsync(string[] files, string? folder = null)
+    {
+        if (_importRunning)
+        {
+            App.LogDiagSafe("[FolderImport] another import is already running — ignored");
+            return;
+        }
+        _importRunning = true;
+        try
+        {
+            await ImportPathsCoreAsync(files, folder);
+        }
+        finally
+        {
+            _importRunning = false;
+        }
+    }
+
+    private async Task ImportPathsCoreAsync(string[] files, string? folder = null)
     {
         int added = 0;
         var pl = _playlists.ActivePlaylist ?? _playlists.DefaultPlaylist;
 
         if (folder is not null)
         {
-            var progress = new Progress<string>(_ => { });
-            added = await _library.AddFolderAsync(folder, progress);
+            App.LogDiagSafe($"[FolderImport] start: {folder}");
+            added = await _library.AddFolderAsync(folder);
         }
         else
         {
             foreach (var f in files)
             {
-                var item = _library.Add(f);
-                if (item is null) continue;
-                added++;
+                try
+                {
+                    var item = _library.Add(f);
+                    if (item is null) continue;
+                    added++;
+                }
+                catch (Exception ex)
+                {
+                    App.LogDiagSafe($"[Import] skipped {f}: {ex.GetType().Name}: {ex.Message}");
+                }
             }
         }
 
         if (added == 0)
         {
+            App.LogDiagSafe(folder is not null
+                ? $"[FolderImport] nothing new imported from {folder} (empty, unsupported, or duplicates)"
+                : "[Import] nothing new imported (duplicates)");
             RefreshMainList();
             return;
         }
@@ -439,8 +476,11 @@ public partial class MainViewModel : ObservableObject
         // Only the items added by this import go to "Now Playing" (Plan §8 step 2).
         var knownBefore = new HashSet<Guid>(MainList.Select(x => x.Id));
         var justAdded = _library.Videos.Where(v => !knownBefore.Contains(v.Id)).ToList();
+        App.LogDiagSafe($"[FolderImport] discovered new items: {justAdded.Count}");
 
-        // Read durations in background (bounded), then finish on UI thread.
+        // Read durations via the crash-isolated probe (bad files cannot kill us);
+        // a failing file is skipped and the rest continue (crash-safety req 7).
+        var durationFailures = 0;
         await Task.Run(async () =>
         {
             foreach (var v in justAdded)
@@ -451,10 +491,14 @@ public partial class MainViewModel : ObservableObject
                 }
                 catch (Exception ex)
                 {
+                    durationFailures++;
                     _logger.LogWarning(ex, "Failed to read duration for {File}", v.FilePath);
+                    App.LogDiagSafe($"[FolderImport] duration read failed, skipped: {v.FilePath}");
                 }
             }
         });
+        if (durationFailures > 0)
+            App.LogDiagSafe($"[FolderImport] {durationFailures} files could not be parsed (kept with unknown duration)");
 
         ExecuteOnUi(() =>
         {
@@ -470,6 +514,8 @@ public partial class MainViewModel : ObservableObject
             _library.Save();
             _playlists.Save();
         });
+
+        App.LogDiagSafe($"[FolderImport] complete: imported={justAdded.Count}, durationFailures={durationFailures}");
     }
 
     private void RefreshMainList()
