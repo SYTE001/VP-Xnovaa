@@ -1,0 +1,27 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Palette (Plan.md §10) -->
+    <Color x:Key="BgMainColor">#101218</Color>
+    <Color x:Key="PanelColor">#151821</Color>
+    <Color x:Key="AccentColor">#4C8DFF</Color>
+
+    <SolidColorBrush x:Key="BgMainBrush" Color="#101218"/>
+    <SolidColorBrush x:Key="PanelBrush" Color="#151821"/>
+    <SolidColorBrush x:Key="PanelLightBrush" Color="#1B1F2C"/>
+    <SolidColorBrush x:Key="PanelHoverBrush" Color="#222736"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#2A2F3E"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#4C8DFF"/>
+    <SolidColorBrush x:Key="AccentDimBrush" Color="#2C5CB8"/>
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#A0A4B8"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#E4575E"/>
+
+    <SolidColorBrush x:Key="SliderTrackBrush" Color="#2A2F3E"/>
+
+    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+    <FontFamily x:Key="AppFont">Segoe UI</FontFamily>
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="FontSizeDefault">12</system:Double>
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="FontSizeTitle">14</system:Double>
+</ResourceDictionary>
